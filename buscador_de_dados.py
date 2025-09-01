@@ -1,5 +1,5 @@
 # buscador_de_dados.py
-__version__ = "2.5.0" # Altere esta versão para a versão atual do seu script
+__version__ = "2.5.1" # Altere esta versão para a versão atual do seu script
 
 # ... (EXISTING IMPORTS) ...
 import json
@@ -2545,145 +2545,152 @@ def _tratar_campos():
                 # Limpeza de Texto em Colunas
                 print("\n--- Limpeza de Texto em Colunas ---")
                 colunas_atuais = list(df_modificado.columns)
+                print(" 0. [TODOS]")
                 for i, col in enumerate(colunas_atuais):
                     print(f" {i+1}. {col}")
-                
-                col_idx_str = input("Digite o NÚMERO da coluna para limpar (ou 'd' para finalizar): ").strip().lower()
-                if col_idx_str == 'd': continue
-                try:
-                    col_idx = int(col_idx_str) - 1
-                    if 0 <= col_idx < len(colunas_atuais):
-                        col_para_limpar = colunas_atuais[col_idx]
-                        
-                        while True:
-                            os.system('cls' if os.name == 'nt' else 'clear') 
-                            print(f"\n--- Limpeza de Texto para a Coluna: '{col_para_limpar}' ---")
-                            print("Selecione uma ou mais opções de limpeza (separadas por vírgula, ex: 1,2,5):")
-                            print("  1. Remover espaços extras (início, fim, múltiplos)")
-                            print("  2. Converter para MAIÚSCULAS")
-                            print("  3. Converter para MINÚSCULAS")
-                            print("  4. Remover caracteres não alfanuméricos (manter letras, números, espaços)")
-                            print("  5. Remover acentos (normalização)")
-                            print("  6. Substituir Caractere/Texto (ex: '-' por '_', '@' por 'a')")
-                            print("  7. Aplicar TODOS os tratamentos (padrão: MAIÚSCULAS)")
-                            print("  8. Truncar caracteres da coluna") # NOVA OPÇÃO AQUI
-                            print("\n [d] Finalizar seleção para esta coluna")
-                            
-                            escolhas_limpeza_str = input("Sua(s) escolha(s): ").strip().lower()
 
-                            if escolhas_limpeza_str == 'd':
-                                print(f"Limpeza de '{col_para_limpar}' finalizada.")
-                                break 
+                col_idx_str = input("Digite o NÚMERO da coluna para limpar (ou '0' para TODAS, 'd' para finalizar): ").strip().lower()
+                if col_idx_str == 'd':
+                    continue
 
-                            opcoes_selecionadas = [op.strip() for op in escolhas_limpeza_str.split(',') if op.strip().isdigit()]
-                            
-                            if not opcoes_selecionadas:
-                                print("Entrada inválida. Por favor, digite os números das opções separados por vírgula.")
-                                time.sleep(1.5)
-                                continue
+                if col_idx_str == '0':
+                    colunas_para_limpar = colunas_atuais
+                else:
+                    try:
+                        col_idx = int(col_idx_str) - 1
+                        if 0 <= col_idx < len(colunas_atuais):
+                            colunas_para_limpar = [colunas_atuais[col_idx]]
+                        else:
+                            print("Número de coluna inválido.")
+                            input("Pressione Enter para continuar...")
+                            continue
+                    except ValueError:
+                        print("Entrada inválida. Por favor, digite um número, '0' ou 'd'.")
+                        input("Pressione Enter para continuar...")
+                        continue
 
-                            # Lógica para a opção "TODOS"
-                            if '7' in opcoes_selecionadas:
-                                # Define as opções padrão para "TODOS"
-                                # Ordem: 5 (acentos) -> 4 (não alfanuméricos) -> 1 (espaços) -> 2 (MAIÚSCULAS) -> 6 (substituição)
-                                opcoes_a_aplicar_todos = ['5', '4', '1', '2'] 
-                                
-                                # Remove 3 (MINÚSCULAS) se 2 (MAIÚSCULAS) estiver em TODOS
-                                if '2' in opcoes_a_aplicar_todos and '3' in opcoes_selecionadas:
-                                    opcoes_selecionadas.remove('3')
-                                    print("  (Opção 3 'MINÚSCULAS' ignorada devido à escolha de 'TODOS' ou 'MAIÚSCULAS'.)")
-
-                                # Combina as opções de 'TODOS' com quaisquer outras escolhidas manualmente,
-                                # garantindo a ordem e removendo duplicatas.
-                                # Usa um OrderedDict para manter a ordem e a unicidade
-                                opcoes_finais_ordenadas_set = OrderedDict()
-                                for op in opcoes_a_aplicar_todos:
-                                    opcoes_finais_ordenadas_set[op] = True
-                                for op in opcoes_selecionadas:
-                                    opcoes_finais_ordenadas_set[op] = True
-                                
-                                # Garante que '7' (TODOS) não seja processado como uma operação, apenas como um gatilho
-                                if '7' in opcoes_finais_ordenadas_set:
-                                    del opcoes_finais_ordenadas_set['7']
-
-                                opcoes_selecionadas_para_executar = list(opcoes_finais_ordenadas_set.keys())
-                                print(f"  (Aplicando TODAS as opções padrão: {opcoes_selecionadas_para_executar})")
-
-                            else: # Se '7' (TODOS) NÃO foi escolhido
-                                # Se o usuário selecionou 2 e 3 (MAIÚSCULAS e MINÚSCULAS)
-                                if '2' in opcoes_selecionadas and '3' in opcoes_selecionadas:
-                                    print("  AVISO: Não é possível aplicar MAIÚSCULAS e MINÚSCULAS simultaneamente. 'MINÚSCULAS' será ignorada.")
-                                    opcoes_selecionadas.remove('3') # Remove MINÚSCULAS se MAIÚSCULAS foi escolhida
-                                
-                                # Garante ordem para as opções individuais
-                                # Certifica-se de incluir a nova opção '8' aqui também
-                                opcoes_selecionadas_para_executar = sorted([op for op in opcoes_selecionadas if op in ['1', '2', '3', '4', '5', '6', '8']])
-
-
-                            aplicado_alguma_limpeza = False
-                            # Aplica as opções de limpeza na ordem em que são definidas
-                            for opcao in opcoes_selecionadas_para_executar: 
-                                if opcao == '1':
-                                    df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.strip().str.replace(r'\s+', ' ', regex=True)
-                                    print(f" - Espaços extras removidos.")
-                                elif opcao == '2':
-                                    df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.upper()
-                                    print(f" - Convertido para MAIÚSCULAS.")
-                                elif opcao == '3':
-                                    df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.lower()
-                                    print(f" - Convertido para MINÚSCULAS.")
-                                elif opcao == '4':
-                                    df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
-                                    print(f" - Caracteres não alfanuméricos removidos.")
-                                elif opcao == '5':
-                                    df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).apply(normalizar_texto) 
-                                    print(f" - Acentos removidos e texto normalizado.")
-                                elif opcao == '6': # NOVA LÓGICA: Substituir Caractere/Texto
-                                    char_to_replace = input(f"  Digite o caractere/texto a ser substituído na coluna '{col_para_limpar}': ").strip()
-                                    replace_with = input(f"  Digite o caractere/texto para substituir '{char_to_replace}' por (deixe vazio para remover): ").strip()
-                                    
-                                    if char_to_replace:
-                                        df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.replace(char_to_replace, replace_with, regex=False) # regex=False para substituição literal
-                                        print(f" - '{char_to_replace}' substituído por '{replace_with}' na coluna '{col_para_limpar}'.")
-                                    else:
-                                        print("  Caractere/texto a ser substituído não informado. Operação de substituição ignorada.")
-                                    input("Pressione Enter para continuar...") # Pausa após a substituição
-                                elif opcao == '8': # NOVA LÓGICA: Truncar caracteres
-                                    while True:
-                                        max_len_str = input(f"  Digite a quantidade MÁXIMA de caracteres para a coluna '{col_para_limpar}': ").strip()
-                                        try:
-                                            max_len = int(max_len_str)
-                                            if max_len < 0:
-                                                print("A quantidade de caracteres não pode ser negativa. Tente novamente.")
-                                            else:
-                                                break
-                                        except ValueError:
-                                            print("Entrada inválida. Por favor, digite um número inteiro.")
-                                    df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.slice(0, max_len)
-                                    print(f" - Coluna '{col_para_limpar}' truncada para {max_len} caracteres.")
-                                    input("Pressione Enter para continuar...") # Pausa após o truncamento
-                                else:
-                                    print(f"  Opção '{opcao}' inválida.") # Se um número fora do range for digitado
-                                    input("Pressione Enter para continuar...")
-                                    continue # Continua para a próxima opção selecionada, não quebra o loop
-
-                                aplicado_alguma_limpeza = True
-                            
-                            if not aplicado_alguma_limpeza:
-                                print("Nenhuma opção de limpeza válida foi selecionada.")
-                            
-                            # Não pedimos Enter aqui para cada opção se múltiplas foram selecionadas,
-                            # apenas no final do bloco de seleção múltipla (após a iteração for).
-                            if aplicado_alguma_limpeza:
-                                print(f"Tratamentos aplicados para '{col_para_limpar}'.")
-                            input("Pressione Enter para continuar a limpeza para esta coluna (ou 'd' para finalizar).") 
-                        
+                while True:
+                    os.system('cls' if os.name == 'nt' else 'clear')
+                    if len(colunas_para_limpar) == 1:
+                        print(f"\n--- Limpeza de Texto para a Coluna: '{colunas_para_limpar[0]}' ---")
                     else:
-                        print("Número de coluna inválido.")
-                        input("Pressione Enter para continuar...") 
-                except ValueError:
-                    print("Entrada inválida. Por favor, digite um número ou 'd'.")
-                    input("Pressione Enter para continuar...") 
+                        print("\n--- Limpeza de Texto para TODAS as Colunas ---")
+                        print(colunas_para_limpar)
+                    print("Selecione uma ou mais opções de limpeza (separadas por vírgula, ex: 1,2,5):")
+                    print("  1. Remover espaços extras (início, fim, múltiplos)")
+                    print("  2. Converter para MAIÚSCULAS")
+                    print("  3. Converter para MINÚSCULAS")
+                    print("  4. Remover caracteres não alfanuméricos (manter letras, números, espaços)")
+                    print("  5. Remover acentos (normalização)")
+                    print("  6. Substituir Caractere/Texto (ex: '-' por '_', '@' por 'a')")
+                    print("  7. Aplicar TODOS os tratamentos (padrão: MAIÚSCULAS)")
+                    print("  8. Truncar caracteres da coluna") # NOVA OPÇÃO AQUI
+                    print("\n [d] Finalizar seleção")
+
+                    escolhas_limpeza_str = input("Sua(s) escolha(s): ").strip().lower()
+
+                    if escolhas_limpeza_str == 'd':
+                        print("Limpeza finalizada.")
+                        break
+
+                    opcoes_selecionadas = [op.strip() for op in escolhas_limpeza_str.split(',') if op.strip().isdigit()]
+
+                    if not opcoes_selecionadas:
+                        print("Entrada inválida. Por favor, digite os números das opções separados por vírgula.")
+                        time.sleep(1.5)
+                        continue
+
+                    # Lógica para a opção "TODOS"
+                    if '7' in opcoes_selecionadas:
+                        # Define as opções padrão para "TODOS"
+                        # Ordem: 5 (acentos) -> 4 (não alfanuméricos) -> 1 (espaços) -> 2 (MAIÚSCULAS)
+                        opcoes_a_aplicar_todos = ['5', '4', '1', '2']
+
+                        # Remove 3 (MINÚSCULAS) se 2 (MAIÚSCULAS) estiver em TODOS
+                        if '2' in opcoes_a_aplicar_todos and '3' in opcoes_selecionadas:
+                            opcoes_selecionadas.remove('3')
+                            print("  (Opção 3 'MINÚSCULAS' ignorada devido à escolha de 'TODOS' ou 'MAIÚSCULAS'.)")
+
+                        opcoes_finais_ordenadas_set = OrderedDict()
+                        for op in opcoes_a_aplicar_todos:
+                            opcoes_finais_ordenadas_set[op] = True
+                        for op in opcoes_selecionadas:
+                            opcoes_finais_ordenadas_set[op] = True
+
+                        if '7' in opcoes_finais_ordenadas_set:
+                            del opcoes_finais_ordenadas_set['7']
+
+                        opcoes_selecionadas_para_executar = list(opcoes_finais_ordenadas_set.keys())
+                        print(f"  (Aplicando TODAS as opções padrão: {opcoes_selecionadas_para_executar})")
+
+                    else: # Se '7' (TODOS) NÃO foi escolhido
+                        if '2' in opcoes_selecionadas and '3' in opcoes_selecionadas:
+                            print("  AVISO: Não é possível aplicar MAIÚSCULAS e MINÚSCULAS simultaneamente. 'MINÚSCULAS' será ignorada.")
+                            opcoes_selecionadas.remove('3')
+
+                        opcoes_selecionadas_para_executar = sorted([op for op in opcoes_selecionadas if op in ['1', '2', '3', '4', '5', '6', '8']])
+
+
+                    aplicado_alguma_limpeza = False
+                    for opcao in opcoes_selecionadas_para_executar:
+                        if opcao == '1':
+                            for col_para_limpar in colunas_para_limpar:
+                                df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.strip().str.replace(r'\s+', ' ', regex=True)
+                            print(f" - Espaços extras removidos.")
+                        elif opcao == '2':
+                            for col_para_limpar in colunas_para_limpar:
+                                df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.upper()
+                            print(f" - Convertido para MAIÚSCULAS.")
+                        elif opcao == '3':
+                            for col_para_limpar in colunas_para_limpar:
+                                df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.lower()
+                            print(f" - Convertido para MINÚSCULAS.")
+                        elif opcao == '4':
+                            for col_para_limpar in colunas_para_limpar:
+                                df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
+                            print(f" - Caracteres não alfanuméricos removidos.")
+                        elif opcao == '5':
+                            for col_para_limpar in colunas_para_limpar:
+                                df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).apply(normalizar_texto)
+                            print(f" - Acentos removidos e texto normalizado.")
+                        elif opcao == '6':
+                            char_to_replace = input("  Digite o caractere/texto a ser substituído: ").strip()
+                            replace_with = input(f"  Digite o caractere/texto para substituir '{char_to_replace}' por (deixe vazio para remover): ").strip()
+                            if char_to_replace:
+                                for col_para_limpar in colunas_para_limpar:
+                                    df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.replace(char_to_replace, replace_with, regex=False)
+                                print(f" - '{char_to_replace}' substituído por '{replace_with}' nas colunas selecionadas.")
+                            else:
+                                print("  Caractere/texto a ser substituído não informado. Operação de substituição ignorada.")
+                            input("Pressione Enter para continuar...")
+                        elif opcao == '8':
+                            while True:
+                                max_len_str = input("  Digite a quantidade MÁXIMA de caracteres: ").strip()
+                                try:
+                                    max_len = int(max_len_str)
+                                    if max_len < 0:
+                                        print("A quantidade de caracteres não pode ser negativa. Tente novamente.")
+                                    else:
+                                        break
+                                except ValueError:
+                                    print("Entrada inválida. Por favor, digite um número inteiro.")
+                            for col_para_limpar in colunas_para_limpar:
+                                df_modificado[col_para_limpar] = df_modificado[col_para_limpar].astype(str).str.slice(0, max_len)
+                            print(f" - Colunas truncadas para {max_len} caracteres.")
+                            input("Pressione Enter para continuar...")
+                        else:
+                            print(f"  Opção '{opcao}' inválida.")
+                            input("Pressione Enter para continuar...")
+                            continue
+
+                        aplicado_alguma_limpeza = True
+
+                    if not aplicado_alguma_limpeza:
+                        print("Nenhuma opção de limpeza válida foi selecionada.")
+
+                    if aplicado_alguma_limpeza:
+                        print(f"Tratamentos aplicados para {', '.join(colunas_para_limpar)}.")
+                    input("Pressione Enter para continuar a limpeza (ou 'd' durante as opções para finalizar).")
 
 
             elif escolha_tratamento == 'p':
