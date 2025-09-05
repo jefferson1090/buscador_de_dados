@@ -1,5 +1,5 @@
 # buscador_de_dados.py
-__version__ = "2.5.1" # Altere esta versão para a versão atual do seu script
+__version__ = "2.5.18" # Altere esta versão para a versão atual do seu script
 
 # ... (EXISTING IMPORTS) ...
 import json
@@ -2911,26 +2911,37 @@ def _load_keys_to_temp_table(temp_table_name, temp_csv_path, loc_cols_in_temp_ta
     for col_name_in_temp_table in loc_cols_in_temp_table:
         columns_for_ctl.append(f"  \"{col_name_in_temp_table}\" CHAR(4000)") 
 
-    ctl_content = f"""
-LOAD DATA
-INFILE '{os.path.abspath(temp_csv_path).replace('\\', '/')}' 
-BADFILE '{os.path.abspath(bad_file_path).replace('\\', '/')}'
-DISCARDFILE '{os.path.abspath(os.path.join(CHECK_BASE_FOLDER, f'{temp_table_name}.dsc')).replace('\\', '/')}'
-INSERT INTO TABLE "{temp_table_name}" 
-FIELDS TERMINATED BY ';'
-OPTIONALLY ENCLOSED BY '"'
-TRAILING NULLCOLS
-(
-{',\n'.join(columns_for_ctl)}
-)
-"""
+    # Prepara os caminhos com separadores de diretório normalizados para evitar problemas em f-strings
+    abs_csv_path = os.path.abspath(temp_csv_path).replace(os.sep, '/')
+    abs_bad_path = os.path.abspath(bad_file_path).replace(os.sep, '/')
+    abs_dsc_path = os.path.abspath(os.path.join(CHECK_BASE_FOLDER, f"{temp_table_name}.dsc")).replace(os.sep, '/')
+    # Monta o conteúdo do arquivo .ctl como lista de linhas para evitar problemas de escape em f-strings
+    lines = []
+    lines.append("LOAD DATA")
+    lines.append(f"INFILE '{abs_csv_path}'")
+    lines.append(f"BADFILE '{abs_bad_path}'")
+    lines.append(f"DISCARDFILE '{abs_dsc_path}'")
+    lines.append(f"INSERT INTO TABLE \"{temp_table_name}\"")
+    lines.append("FIELDS TERMINATED BY ';'")
+    # Utilize concatenação para incluir corretamente aspas simples e duplas: gerará a string
+    # OPTIONALLY ENCLOSED BY '"' no arquivo .ctl
+    lines.append('OPTIONALLY ENCLOSED BY ' + "'\"'")
+    lines.append("TRAILING NULLCOLS")
+    lines.append("(")
+    lines.append(',\n'.join(columns_for_ctl))
+    lines.append(")")
+    ctl_content = '\n'.join(lines)
     print(f"  Carregando chaves para '{temp_table_name}' via SQL*Loader...")
     
     try:
         with open(ctl_file_path, 'w', encoding='utf-8') as f:
             f.write(ctl_content.strip())
 
-        sqlldr_command_args_string = f"control='{os.path.abspath(ctl_file_path).replace('\\', '/')}' log='{os.path.abspath(log_file_path).replace('\\', '/')}' bad='{os.path.abspath(bad_file_path).replace('\\', '/')}'"
+        # Prepara os caminhos normalizados para o comando do SQL*Loader
+        abs_ctl_path = os.path.abspath(ctl_file_path).replace(os.sep, '/')
+        abs_log_path2 = os.path.abspath(log_file_path).replace(os.sep, '/')
+        abs_bad_path2 = os.path.abspath(bad_file_path).replace(os.sep, '/')
+        sqlldr_command_args_string = f"control='{abs_ctl_path}' log='{abs_log_path2}' bad='{abs_bad_path2}'"
         
         # AQUI: Usando o retorno aprimorado de _executar_sql_comando
         sqlldr_success_code, exec_message = _executar_sql_comando(sqlldr_command_args_string, 'sqlldr', user, password, db, log_file_path=log_file_path)
@@ -3008,12 +3019,14 @@ def _extract_db_data_with_join(table_name_db, temp_table_name, loc_cols_db, comp
     temp_data_file_path = os.path.join(CHECK_BASE_FOLDER, f"TEMP_DB_EXTRACT_JOIN_{table_name_db}.csv")
     temp_extract_log_path = os.path.join(CHECK_BASE_FOLDER, f"{temp_table_name}_extract_join_log.txt")
 
+    # Prepara o caminho de spool normalizado para evitar uso de barras invertidas em f-strings
+    spool_file_path = os.path.abspath(temp_data_file_path).replace(os.sep, '/')
     spool_command_parts = [
         "SET HEADING OFF;",
         "SET FEEDBACK OFF;",
         "SET PAGESIZE 0;",
         "SET LINESIZE 32767;", 
-        f"SPOOL {os.path.abspath(temp_data_file_path).replace('\\', '/')};",
+        f"SPOOL {spool_file_path};",
         final_sql_query,
         "SPOOL OFF;",
         "EXIT;"
@@ -3380,12 +3393,14 @@ def _verificar_duplicidade_arquivo_vs_banco():
     db_columns_temp_file = os.path.join(CHECK_BASE_FOLDER, f"{table_name_db}_columns.csv")
     db_columns_log_file = os.path.join(CHECK_BASE_FOLDER, f"{table_name_db}_get_cols_log.txt")
 
+    # Normaliza caminho para o spool de colunas e monta o comando
+    db_columns_temp_file_norm = os.path.abspath(db_columns_temp_file).replace(os.sep, '/')
     spool_command_db_cols = "\n".join([
         "SET HEADING OFF;",
         "SET FEEDBACK OFF;",
         "SET PAGESIZE 0;",
         "SET LINESIZE 32767;",
-        f"SPOOL {os.path.abspath(db_columns_temp_file).replace('\\', '/')};",
+        f"SPOOL {db_columns_temp_file_norm};",
         sql_get_db_columns,
         "SPOOL OFF;",
         "EXIT;"
@@ -4028,8 +4043,23 @@ def _inferir_tipo_coluna(series, sample_size=5000): # Aumentado sample_size para
     #print(f"DEBUG_INFER: Tamanho da amostra: {len(sample)}") # NOVO PRINT
 
     if sample.empty:
-        #print(f"DEBUG_INFER: Coluna '{series.name}' vazia ou amostra vazia. Retornando VARCHAR2(500).") # NOVO PRINT
-        return "VARCHAR2(500)"
+        #print(f"DEBUG_INFER: Coluna '{series.name}' vazia ou amostra vazia. Retornando VARCHAR2(1000).") # NOVO PRINT
+        return "VARCHAR2(1000)"
+
+    # --- Verificação especial para colunas iniciadas por 'DT_' ou 'DT' que podem conter apenas dias (1-31) ---
+    col_name_upper = str(series.name).upper() if series.name is not None else ""
+    if col_name_upper.startswith(('DT_', 'DT')):
+        # Tenta converter para número
+        numeric_series_temp = pd.to_numeric(sample.str.replace(',', '.').str.replace(';', ''), errors='coerce')
+        numeric_count_temp = numeric_series_temp.count()
+        if len(sample) > 0 and numeric_count_temp / len(sample) > 0.8:
+            # Obtém valores numéricos para verificar faixa de dias
+            numeric_max = numeric_series_temp.max()
+            numeric_min = numeric_series_temp.min()
+            # Se os valores forem números inteiros e estiverem entre 1 e 31, trata como NUMBER (dias)
+            if pd.notna(numeric_max) and pd.notna(numeric_min):
+                if numeric_max <= 31 and numeric_min >= 1:
+                    return "NUMBER"
 
     # --- Tentar inferir como DATA ---
     temp_date_series = pd.to_datetime(sample, errors='coerce', dayfirst=True)
@@ -4054,8 +4084,8 @@ def _inferir_tipo_coluna(series, sample_size=5000): # Aumentado sample_size para
         return "NUMBER"
 
     # --- Fallback para VARCHAR2 ---
-    #print(f"DEBUG_INFER: Coluna '{series.name}' inferida como VARCHAR2(500) (fallback).") # NOVO PRINT
-    return "VARCHAR2(500)"
+    #print(f"DEBUG_INFER: Coluna '{series.name}' inferida como VARCHAR2(1000) (fallback).") # NOVO PRINT
+    return "VARCHAR2(1000)"
     
 # buscador_de_dados.py
 # Função para renomear colunas para padrão Oracle (NOVA LÓGICA REESCRITA PARA SUFIXOS)
@@ -4073,8 +4103,65 @@ def _rename_column_for_oracle(column_name):
     # Limpeza inicial agressiva: apenas letras, números e underscores
     cleaned_name = re.sub(r'[^a-zA-Z0-9_]', '', column_name)
     cleaned_name = cleaned_name.upper().strip()
-    original_cleaned = cleaned_name 
+    original_cleaned = cleaned_name
+    # Ajustes específicos de substituição antes de qualquer prefixo/palavra-chave.
+    # Alguns nomes longos precisam ser simplificados de imediato.
+    # Ex.: CD_IDENTIFICADOR_CONTRATO_* -> CD_CONTRATO_*
+    cleaned_name = cleaned_name.replace('CD_IDENTIFICADOR_CONTRATO_', 'CD_CONTRATO_')
+    cleaned_name = cleaned_name.replace('CD_IDENTIFICADOR_CONTRATO', 'CD_CONTRATO')
+    # Expandido para tratar variações do identificador de contrato coletivo
+    # se contiver CD_IDENTIFICADOR_CONTRATO_COLE ou IDENTIFICADOR_CONTRATO_COLETIVO, normaliza para CD_CONTRATO
+    cleaned_name = cleaned_name.replace('CD_IDENTIFICADOR_CONTRATO_COLE', 'CD_CONTRATO')
+    cleaned_name = cleaned_name.replace('IDENTIFICADOR_CONTRATO_COLETIVO', 'CD_CONTRATO')
+    # Também cobre o caso com prefixo CD_ completo para contrato coletivo
+    cleaned_name = cleaned_name.replace('CD_IDENTIFICADOR_CONTRATO_COLETIVO', 'CD_CONTRATO')
+    # Ex.: DT_AGENDAMENTO_CANCELAMENTO -> DT_CANCELAMENTO
+    cleaned_name = cleaned_name.replace('DT_AGENDAMENTO_CANCELAMENTO', 'DT_CANCELAMENTO')
+    # Atualiza o original_cleaned para refletir as substituições
+    original_cleaned = cleaned_name
+    # --- Regras de substituição específicas ---
+    # Algumas colunas têm prefixos ou palavras específicas que devem ser convertidos
+    # para prefixos padrão antes de outras regras. Isto inclui combinações como
+    # 'CD_COD_' que deve virar 'CD_', 'CODIGO'/'COD_' -> 'CD_', 'VALOR' -> 'VL_',
+    # 'CPF' -> 'NU_CPF'. Regras especiais para NOME/SEXO/NUMERO são tratadas abaixo.
+    custom_mappings = [
+        ('CD_COD_', 'CD_'),
+        ('CODIGO_', 'CD_'),
+        ('CODIGO', 'CD_'),
+        ('COD_', 'CD_'),
+        ('VALOR_', 'VL_'),
+        ('VALOR', 'VL_'),
+        ('CPF_', 'NU_CPF_'),
+        ('CPF', 'NU_CPF')
+    ]
+    for pattern, replacement in custom_mappings:
+        if cleaned_name.startswith(pattern):
+            remainder = cleaned_name[len(pattern):]
+            cleaned_name = replacement + remainder
+            # Atualiza também o original_cleaned para refletir a substituição
+            original_cleaned = cleaned_name
+            break
     ##print(f"DEBUG_RENAME: Nome limpo: '{cleaned_name}'")
+
+    # --- Regras especiais para NOME, SEXO e NUMERO ---
+    # Estas regras devem ser aplicadas antes das demais
+    # 1. NOME isolado vira NM_NOME
+    if cleaned_name == 'NOME':
+        return 'NM_NOME'[:30]
+    # 2. NOME_ seguido de sufixo vira NM_ + sufixo (mantém o restante após o underscore)
+    if cleaned_name.startswith('NOME_'):
+        suffix = cleaned_name[len('NOME_'):]
+        return ('NM_' + suffix)[:30]
+    # 3. SEXO isolado ou começando por SEXO: prefixa FL_ e mantém o restante inteiro
+    if cleaned_name.startswith('SEXO'):
+        return ('FL_' + cleaned_name)[:30]
+    # 4. NUMERO isolado vira NM_NUMERO (conforme regra fornecida)
+    if cleaned_name == 'NUMERO':
+        return 'NM_NUMERO'[:30]
+    # 5. NUMERO_ seguido de sufixo vira NM_ + sufixo
+    if cleaned_name.startswith('NUMERO_'):
+        suffix = cleaned_name[len('NUMERO_'):]
+        return ('NM_' + suffix)[:30]
 
     PREFIXOS_ALVO = {"NM_", "DS_", "QT_", "DT_", "NU_", "CD_", "VL_", "TP_"}
     MAP_PALAVRAS_CHAVE = OrderedDict([
@@ -4150,9 +4237,231 @@ def _rename_column_for_oracle(column_name):
     ##print(f"DEBUG_RENAME: Nome truncado (30 chars): '{final_name}'")
     return final_name
 
+# --- NOVA FUNÇÃO: Definição Interativa de Campos ---
+def _definir_campos_interativamente(df, renamed_columns_with_types, table_name):
+    """
+    Permite ao usuário interativamente ajustar o nome, o tipo, a ordem e os índices das colunas
+    antes da criação da tabela no banco. Esta função modifica o DataFrame e o dicionário de tipos
+    conforme as escolhas do usuário e retorna as estruturas atualizadas junto com quaisquer
+    índices personalizados e um novo nome de tabela, se modificado.
+
+    Parâmetros:
+        df (pd.DataFrame): DataFrame com colunas já renomeadas pelo script.
+        renamed_columns_with_types (dict): Mapeamento de coluna para tipo inferido/mapeado.
+        table_name (str): Nome atual proposto para a tabela.
+
+    Retorna:
+        df (pd.DataFrame): DataFrame possivelmente modificado (colunas renomeadas/adicionadas/excluídas).
+        renamed_columns_with_types (OrderedDict): Dicionário de colunas e tipos modificado.
+        table_name (str): Nome final da tabela após possíveis alterações.
+        custom_indexes (list[list[str]]): Lista de índices personalizados; vazia se nenhum índice definido.
+    """
+    import pandas as pd  # Garantia de que pd está disponível dentro da função
+    # Usamos OrderedDict para preservar a ordem das colunas
+    if not isinstance(renamed_columns_with_types, OrderedDict):
+        renamed_columns_with_types = OrderedDict(renamed_columns_with_types)
+
+    # Função auxiliar para listar as colunas com seus índices e tipos
+    def mostrar_colunas(col_types):
+        print("\nColunas atuais e seus tipos:")
+        for idx, (col, typ) in enumerate(col_types.items(), start=1):
+            print(f"  {idx}. {col} [{typ}]")
+        print("\n")
+
+    # Lista para armazenar índices personalizados (cada item é uma lista de nomes de colunas).
+    # Se for None, significa que o usuário escolheu manter os índices padrão.
+    custom_indexes = None
+
+    while True:
+        mostrar_colunas(renamed_columns_with_types)
+        print("Opções de definição de campos:")
+        print(" 1. Alterar tipo dos campos")
+        print(" 2. Alterar o nome do campo")
+        print(" 3. Criar Índices (compostos ou simples)")
+        print(" 4. Alterar nome da tabela")
+        print(" 5. Incluir novo campo")
+        print(" 6. Excluir um ou mais campos")
+        print(" 0. Concluir definições")
+        escolha = input("Escolha uma opção: ").strip()
+
+        if escolha == '0':
+            break
+        elif escolha == '1':
+            # Alterar tipos de campos
+            sel = input("Digite os números dos campos que deseja alterar (separados por vírgula): ").strip()
+            if not sel:
+                continue
+            try:
+                indices = [int(x) for x in sel.replace(' ', '').split(',') if x]
+                for idx in indices:
+                    if 1 <= idx <= len(renamed_columns_with_types):
+                        col = list(renamed_columns_with_types.keys())[idx - 1]
+                        current_type = renamed_columns_with_types[col]
+                        new_type = input(f"Novo tipo para '{col}' (atual {current_type}): ").strip().upper()
+                        if new_type:
+                            renamed_columns_with_types[col] = new_type
+                    else:
+                        print(f"Índice {idx} inválido. Ignorando.")
+            except ValueError:
+                print("Entrada inválida. Certifique-se de inserir números separados por vírgula.")
+
+        elif escolha == '2':
+            # Alterar nome de um campo
+            sel = input("Digite o número do campo que deseja renomear: ").strip()
+            if not sel:
+                continue
+            try:
+                idx = int(sel)
+                if 1 <= idx <= len(renamed_columns_with_types):
+                    old_name = list(renamed_columns_with_types.keys())[idx - 1]
+                    new_name = input(f"Novo nome para '{old_name}': ").strip().upper()
+                    # Remove caracteres inválidos
+                    new_name_clean = re.sub(r'[^A-Z0-9_]', '', new_name)
+                    if not new_name_clean:
+                        print("Nome inválido. Nenhuma alteração realizada.")
+                        continue
+                    if new_name_clean in renamed_columns_with_types:
+                        print("Nome já existe. Nenhuma alteração realizada.")
+                        continue
+                    # Atualiza DataFrame e dicionário
+                    df.rename(columns={old_name: new_name_clean}, inplace=True)
+                    col_type = renamed_columns_with_types.pop(old_name)
+                    # Para preservar a ordem, reconstruímos o OrderedDict
+                    new_ordered = OrderedDict()
+                    for i, (cname, ctype) in enumerate(renamed_columns_with_types.items()):
+                        if i == idx - 1:
+                            new_ordered[new_name_clean] = col_type
+                        new_ordered[cname] = ctype
+                    # Se renomeado estava no final
+                    if len(renamed_columns_with_types) < idx:
+                        new_ordered[new_name_clean] = col_type
+                    renamed_columns_with_types = new_ordered
+                else:
+                    print("Índice inválido. Nenhuma alteração realizada.")
+            except ValueError:
+                print("Entrada inválida. Informe um número inteiro.")
+
+        elif escolha == '3':
+            # Menu para criar ou modificar índices personalizados
+            while True:
+                print("\n--- Definição de Índices ---")
+                # Exibe índices atuais
+                if custom_indexes is None:
+                    print("Índices atuais: usar padrão (um índice por coluna)")
+                elif not custom_indexes:
+                    print("Índices atuais: nenhum índice definido (nenhum será criado)")
+                else:
+                    print("Índices atuais (em ordem de criação):")
+                    for j, idx_cols in enumerate(custom_indexes, start=1):
+                        print(f"  {j}. {', '.join(idx_cols)}")
+                print("\nOpções:")
+                print(" 1. Adicionar índice")
+                print(" 2. Remover índice existente")
+                print(" 3. Limpar todos os índices (nenhum índice será criado)")
+                print(" 4. Restaurar para índices padrão")
+                print(" 0. Voltar para o menu principal")
+                op_idx = input("Escolha uma opção: ").strip()
+                if op_idx == '0':
+                    break
+                elif op_idx == '1':
+                    # Inicializa lista se for None
+                    if custom_indexes is None:
+                        custom_indexes = []
+                    # Adicionar novo índice
+                    mostrar_colunas(renamed_columns_with_types)
+                    sel = input("Digite os números das colunas para o novo índice (separados por vírgula): ").strip()
+                    if not sel:
+                        continue
+                    try:
+                        indices = [int(x) for x in sel.replace(' ', '').split(',') if x]
+                        valid_cols = []
+                        for idx_num in indices:
+                            if 1 <= idx_num <= len(renamed_columns_with_types):
+                                valid_cols.append(list(renamed_columns_with_types.keys())[idx_num - 1])
+                            else:
+                                print(f"  Índice {idx_num} inválido. Ignorando.")
+                        if valid_cols:
+                            custom_indexes.append(valid_cols)
+                    except ValueError:
+                        print("Entrada inválida. Utilize números separados por vírgula.")
+                elif op_idx == '2':
+                    # Remover índice existente
+                    if custom_indexes is None or not custom_indexes:
+                        print("Nenhum índice personalizado para remover.")
+                        continue
+                    try:
+                        rem = input("Digite o número do índice que deseja remover: ").strip()
+                        if not rem:
+                            continue
+                        rem_idx = int(rem)
+                        if 1 <= rem_idx <= len(custom_indexes):
+                            custom_indexes.pop(rem_idx - 1)
+                        else:
+                            print("Número de índice inválido.")
+                    except ValueError:
+                        print("Entrada inválida. Informe um número.")
+                elif op_idx == '3':
+                    # Limpar todos os índices personalizados (nenhum índice será criado)
+                    custom_indexes = []
+                elif op_idx == '4':
+                    # Restaurar índices padrão (usará índices 1-1 por coluna)
+                    custom_indexes = None
+                else:
+                    print("Opção inválida. Tente novamente.")
+
+        elif escolha == '4':
+            # Alterar nome da tabela
+            new_table = input(f"Novo nome para a tabela (atual {table_name}): ").strip().upper()
+            new_table_clean = re.sub(r'[^A-Z0-9_]', '', new_table)
+            if new_table_clean:
+                table_name = new_table_clean
+            else:
+                print("Nome inválido. Mantendo o nome atual.")
+
+        elif escolha == '5':
+            # Incluir novo campo
+            new_field = input("Digite o nome do novo campo: ").strip().upper()
+            new_field_clean = re.sub(r'[^A-Z0-9_]', '', new_field)
+            if not new_field_clean:
+                print("Nome inválido. Campo não incluído.")
+                continue
+            if new_field_clean in renamed_columns_with_types:
+                print("Este nome de campo já existe. Escolha outro.")
+                continue
+            # Mudado exemplo para refletir o tamanho padrão de VARCHAR2 atual
+            new_type = input("Digite o tipo do novo campo (ex: VARCHAR2(1000), NUMBER, DATE): ").strip().upper()
+            if not new_type:
+                print("Tipo inválido. Campo não incluído.")
+                continue
+            # Adiciona ao DataFrame (com valores nulos) e ao dicionário de tipos (no final)
+            df[new_field_clean] = None
+            renamed_columns_with_types[new_field_clean] = new_type
+
+        elif escolha == '6':
+            # Excluir um ou mais campos
+            sel = input("Digite os números dos campos que deseja excluir (separados por vírgula): ").strip()
+            if not sel:
+                continue
+            try:
+                indices = sorted(set(int(x) for x in sel.replace(' ', '').split(',') if x), reverse=True)
+                for idx in indices:
+                    if 1 <= idx <= len(renamed_columns_with_types):
+                        col_to_drop = list(renamed_columns_with_types.keys())[idx - 1]
+                        # Remove do DataFrame e do mapeamento
+                        df.drop(columns=[col_to_drop], inplace=True)
+                        renamed_columns_with_types.pop(col_to_drop, None)
+                    else:
+                        print(f"Índice {idx} inválido. Ignorando.")
+            except ValueError:
+                print("Entrada inválida. Use números separados por vírgula.")
+        else:
+            print("Opção inválida. Tente novamente.")
+
+    return df, renamed_columns_with_types, table_name, custom_indexes
+
 # --- Funções de Processamento e Renomeação ---
 # Removidos prints de debug e ajustadas mensagens de retorno
-def _processar_e_renomear_arquivos_e_colunas(arquivos_originais_paths):
+def _processar_e_renomear_arquivos_e_colunas(arquivos_originais_paths, interactive_definitions=True):
     os.makedirs(IMPORT_BASE_FOLDER, exist_ok=True)
     processed_files_info = []
 
@@ -4227,20 +4536,66 @@ def _processar_e_renomear_arquivos_e_colunas(arquivos_originais_paths):
                             break
                     renamed_columns_map[col] = new_col_name
 
-                    # Debug da inferência de tipo
+                    # Determinação inteligente do tipo da coluna
                     try:
-                        inferred_type = _inferir_tipo_coluna(df[col])
+                        inferred_type = None
+                        upper_new = new_col_name.upper()
+                        # Verifique palavras-chave específicas que impõem tipo VARCHAR2(100)
+                        # para colunas que contêm OPERADORA, CREDENCIAL, CARTEIRINHA ou CONTRATO
+                        keywords_100 = ["OPERADORA", "CREDENCIAL", "CARTEIRINHA", "CONTRATO"]
+                        if any(kw in upper_new for kw in keywords_100):
+                            inferred_type = "VARCHAR2(100)"
+                        else:
+                            # Extraia o prefixo principal da coluna (antes do primeiro underscore)
+                            if '_' in upper_new:
+                                prefix_key = upper_new.split('_')[0] + '_'
+                            else:
+                                # Se não houver underscore, use os três primeiros caracteres como tentativa
+                                prefix_key = (upper_new[:3] + '_') if len(upper_new) >= 3 else (upper_new + '_')
+                            # Mapeamento padrão de prefixos para tipos
+                            type_mapping = {
+                                "CD_": "VARCHAR2(1000)",
+                                "NM_": "VARCHAR2(1000)",
+                                "NR_": "VARCHAR2(1000)",
+                                "DS_": "VARCHAR2(1000)",
+                                "NU_": "NUMBER",
+                                "QT_": "NUMBER",
+                                "FL_": "VARCHAR2(1000)",
+                                "VL_": "NUMBER",
+                                "PC_": "NUMBER",
+                                "DG_": "VARCHAR2(1000)",
+                                "IM_": "BLOB"
+                            }
+                            if prefix_key == "DT_":
+                                # Para colunas de data, decidir entre DATE e NUMBER
+                                raw_type = _inferir_tipo_coluna(df[col])
+                                inferred_type = "NUMBER" if raw_type == "NUMBER" else "DATE"
+                            elif prefix_key in type_mapping:
+                                inferred_type = type_mapping[prefix_key]
+                            else:
+                                # Fallback para inferência genérica se prefixo desconhecido
+                                inferred_type = _inferir_tipo_coluna(df[col])
                         renamed_columns_with_types[new_col_name] = inferred_type
-                        #print(f"DEBUG: Tipo inferido para '{new_col_name}': {inferred_type}")
+                        #print(f"DEBUG: Tipo inferido/mapeado para '{new_col_name}': {inferred_type}")
                     except Exception as e_infer:
                         #print(f"DEBUG: Erro ao inferir tipo para coluna '{col}': {e_infer}")
-                        renamed_columns_with_types[new_col_name] = "VARCHAR2(500)" # Fallback para continuar
+                        renamed_columns_with_types[new_col_name] = "VARCHAR2(1000)" # Fallback para continuar
 
                 df.rename(columns=renamed_columns_map, inplace=True)
 
+                # Após renomear, decide se oferece ou não a opção de definição manual de campos.
+                custom_indexes_for_this_file = None
+                if interactive_definitions:
+                    resp_def_fields = input("Deseja fazer definição dos campos? (s/n): ").strip().lower()
+                    if resp_def_fields == 's':
+                        # Executa interação e captura possíveis alterações
+                        df, renamed_columns_with_types, table_name_candidate_base, custom_indexes_for_this_file = _definir_campos_interativamente(
+                            df, renamed_columns_with_types, table_name_candidate_base
+                        )
+
                 #print(f"DEBUG: Colunas do DF após renomeação: {list(df.columns)}")
 
-                # Estas linhas estavam com indentação incorreta e causavam o IndentationError
+                # Continua usando table_name_candidate_base como table_name_final, que pode ter sido alterado
                 table_name_final_for_ddl_and_ctl = table_name_candidate_base
                 copied_csv_file_name = f"{table_name_final_for_ddl_and_ctl}.csv"
                 copied_csv_file_path = os.path.join(IMPORT_BASE_FOLDER, copied_csv_file_name)
@@ -4257,7 +4612,8 @@ def _processar_e_renomear_arquivos_e_colunas(arquivos_originais_paths):
                     "renamed_columns_with_types": renamed_columns_with_types,  # NOVO: Nomes e Tipos Inferidos
                     "record_count": len(df),
                     "original_sheet_name": None,
-                    "ddl_success": False # NOVO: Inicializa o status DDL como False
+                    "ddl_success": False, # NOVO: Inicializa o status DDL como False
+                    "custom_indexes": custom_indexes_for_this_file  # Novo: armazena índices personalizados se definidos
                 })
             except Exception as e:
                 # O erro "tuple index out of range" original deve aparecer aqui agora
@@ -4313,16 +4669,49 @@ def _gerar_e_executar_ddl(processed_files_info, db_conn_info, force_create_mode=
 
         create_ddl_content_parts = [
             "SET ECHO ON;",
-            "WHENEVER SQLERROR EXIT FAILURE;", 
+            "WHENEVER SQLERROR EXIT FAILURE;",
             f"CREATE TABLE \"{table_name}\" ("
         ]
         create_ddl_content_parts.extend(column_lines_for_ddl)
-        create_ddl_content_parts.extend([
-            ");",
-            "COMMIT;",
-            "EXIT;"
-        ])
-        create_ddl_content = "\n".join(create_ddl_content_parts)
+        create_ddl_content_parts.append(");")
+        # Gerar índices sequenciais para cada coluna
+        base_table_for_index = re.sub(r'_\d+$', '', table_name)
+        base_name_upper = base_table_for_index.upper()
+        # Calcular o tamanho máximo permitido do nome base para índices, considerando o prefixo 'IDX_' e sufixo numérico de 2 dígitos
+        max_base_len = 35 - len('IDX_') - 2
+        if len(base_name_upper) > max_base_len:
+            base_name_upper = base_name_upper[:max_base_len]
+        # Determina se existem índices personalizados definidos durante o processamento do arquivo
+        custom_indexes = file_info.get('custom_indexes')
+        index_lines_for_ddl = []
+        if custom_indexes is not None:
+            # Caso o usuário tenha entrado no menu de índices personalizados
+            if custom_indexes:
+                # Existem índices definidos: cria cada índice personalizado (simples ou composto)
+                for idx_num, idx_cols in enumerate(custom_indexes, start=1):
+                    suffix = str(idx_num).zfill(2)
+                    index_name = f'IDX_{base_name_upper}{suffix}'
+                    cols_list = ", ".join([f'"{col}"' for col in idx_cols])
+                    index_line = f'CREATE INDEX {index_name} ON {table_name} ({cols_list});'
+                    index_lines_for_ddl.append(index_line)
+                # Nenhum índice será criado se a lista estiver vazia (usuário optou por nenhum índice)
+            else:
+                # custom_indexes é uma lista vazia: o usuário optou por não criar índices
+                index_lines_for_ddl = []
+        else:
+            # custom_indexes == None: usar índices padrão um-para-um para cada coluna
+            for idx_num, col_name in enumerate(renamed_columns_with_types.keys(), start=1):
+                suffix = str(idx_num).zfill(2)
+                index_name = f'IDX_{base_name_upper}{suffix}'
+                index_line = f'CREATE INDEX {index_name} ON {table_name} ("{col_name}");'
+                index_lines_for_ddl.append(index_line)
+        # Adiciona as instruções de criação de índices (caso existam)
+        create_ddl_content_parts.extend(index_lines_for_ddl)
+        # Finaliza o script com COMMIT e EXIT
+        create_ddl_content_parts.append('COMMIT;')
+        create_ddl_content_parts.append('EXIT;')
+        # Concatena todas as partes do DDL em uma única string
+        create_ddl_content = '\n'.join(create_ddl_content_parts)
 
 
         try:
@@ -4506,32 +4895,41 @@ def _gerar_e_executar_sqlldr(processed_files_info, db_conn_info, load_mode='appe
             else:
                 column_entries_for_ctl.append(f"  \"{col_name}\" CHAR(4000)") 
 
-        ctl_content = f"""
-LOAD DATA
-INFILE '{os.path.abspath(copied_file_path).replace('\\', '/')}' 
-BADFILE '{os.path.abspath(bad_file_path).replace('\\', '/')}'
-DISCARDFILE '{os.path.abspath(discard_file_path).replace('\\', '/')}'
--- REMOVIDO: ROWS 5000 - Removido para estabilizar a carga. O SQL*Loader usará seu padrão de commit.
-{load_method} INTO TABLE "{table_name}"
-FIELDS TERMINATED BY ';'
-OPTIONALLY ENCLOSED BY '"'
-TRAILING NULLCOLS
-(
-{',\n'.join(column_entries_for_ctl)}
-)
-"""
+        # Normaliza caminhos para o arquivo copiado e para os arquivos BAD e DISCARD
+        copied_abs = os.path.abspath(copied_file_path).replace(os.sep, '/')
+        bad_abs = os.path.abspath(bad_file_path).replace(os.sep, '/')
+        discard_abs = os.path.abspath(discard_file_path).replace(os.sep, '/')
+        # Monta o conteúdo do arquivo .ctl como uma lista de linhas para evitar problemas com f-strings
+        ctl_content_parts = []
+        ctl_content_parts.append("LOAD DATA")
+        ctl_content_parts.append(f"INFILE '{copied_abs}'")
+        ctl_content_parts.append(f"BADFILE '{bad_abs}'")
+        ctl_content_parts.append(f"DISCARDFILE '{discard_abs}'")
+        ctl_content_parts.append("-- REMOVIDO: ROWS 5000 - Removido para estabilizar a carga. O SQL*Loader usará seu padrão de commit.")
+        ctl_content_parts.append(f"{load_method} INTO TABLE \"{table_name}\"")
+        ctl_content_parts.append("FIELDS TERMINATED BY ';'")
+        ctl_content_parts.append('OPTIONALLY ENCLOSED BY ' + "'\"'")
+        ctl_content_parts.append("TRAILING NULLCOLS")
+        ctl_content_parts.append("(")
+        ctl_content_parts.append(',\n'.join(column_entries_for_ctl))
+        ctl_content_parts.append(")")
+        ctl_content = "\n".join(ctl_content_parts)
         # Outer try-except para gerar CTL ou executar SQL*Loader
         try: # <--- INÍCIO DO TRY EXTERNO. TUDO ABAIXO DEVE SER INDENTADO A PARTIR DAQUI.
             with open(ctl_file_path, 'w', encoding='utf-8') as f:
                 f.write(ctl_content.strip())
             print(f"  Gerado arquivo CTL para '{table_name}'.")
 
+            # Normaliza caminhos para evitar problemas de escape em f-strings e prepara argumentos do SQL*Loader
+            ctl_abs_path = os.path.abspath(ctl_file_path).replace(os.sep, '/')
+            bad_abs_path = os.path.abspath(bad_file_path).replace(os.sep, '/')
+            discard_abs_path = os.path.abspath(discard_file_path).replace(os.sep, '/')
             sqlldr_command = [
                 "sqlldr.exe",
                 f"{user}/{password}@{db}",
-                f"control='{os.path.abspath(ctl_file_path).replace(os.sep, '/')}'",
-                f"bad='{os.path.abspath(bad_file_path).replace(os.sep, '/')}'",
-                f"discard='{os.path.abspath(discard_file_path).replace(os.sep, '/')}'"
+                f"control='{ctl_abs_path}'",
+                f"bad='{bad_abs_path}'",
+                f"discard='{discard_abs_path}'"
             ]
             
             print(f"\n  Iniciando importação de '{os.path.basename(copied_file_path)}' para '{table_name}'...")
@@ -4772,6 +5170,7 @@ def _submenu_historico_importacao(db_conn_info):
             return 'nova_importacao'
         
         elif escolha == '2':
+            # Opção para re-importar registros existentes ou carregar novos dados para a mesma tabela
             if not historico_importacao:
                 print("Nenhum histórico para re-importar.")
                 time.sleep(1.5)
@@ -4780,133 +5179,176 @@ def _submenu_historico_importacao(db_conn_info):
                 idx = int(input("Digite o NÚMERO da importação que deseja RE-IMPORTAR: ").strip()) - 1
                 if 0 <= idx < len(historico_importacao):
                     entry_to_reimport = historico_importacao[idx]
-                    
-                    original_file_for_reimport = entry_to_reimport.get('original_file', None)
-                    if original_file_for_reimport is None:
-                        print(f"❌ Erro: Entrada de histórico selecionada não possui 'original_file'. Por favor, selecione outra ou limpe o histórico.")
+                    table_name_hist = entry_to_reimport.get('table_name', None)
+                    if not table_name_hist:
+                        print("Registro de histórico inválido (tabela ausente). Selecione outro ou limpe o histórico.")
                         input("Pressione Enter para continuar...")
                         continue
-
-                    copied_path = entry_to_reimport.get('copied_file_path', '')
-                    if not copied_path or not os.path.exists(copied_path): 
-                        print(f"❌ Erro: O arquivo copiado '{os.path.basename(copied_path) if copied_path else 'AUSENTE'}' não foi encontrado. Não é possível re-importar. Por favor, regenere a carga original ou use um arquivo válido.")
-                        input("Pressione Enter para continuar...")
+                    print(f"\nSelecione a forma de re-importação para a tabela '{table_name_hist}':")
+                    print(" 1. Utilizar o mesmo arquivo processado da importação original")
+                    print(" 2. Selecionar um novo arquivo para re-importação")
+                    print(" 0. Cancelar")
+                    opcao_reimp = input("Digite sua opção: ").strip()
+                    if opcao_reimp == '0':
                         continue
-                    
-                    print(f"\nIniciando re-importação para a tabela '{entry_to_reimport.get('table_name', 'N/A')}'...")
-                    
-                    df_reimport_temp = None
-                    file_ext_reimport = os.path.splitext(copied_path)[1].lower()
-                    if file_ext_reimport == '.csv':
-                        # Use a detecção de propriedades CSV para robustez na re-importação também
-                        csv_props_reimport = _detect_csv_properties(copied_path)
-                        detected_delimiter_reimport = csv_props_reimport['delimiter']
-                        detected_quoting_reimport = csv_props_reimport['quoting']
-                        
-                        for encoding in ENCODINGS_TO_TRY:
+                    if opcao_reimp == '1':
+                        # Re-importação utilizando o arquivo original copiado e processado
+                        copied_path = entry_to_reimport.get('copied_file_path', '')
+                        if not copied_path or not os.path.exists(copied_path):
+                            print(f"❌ Erro: O arquivo copiado '{os.path.basename(copied_path) if copied_path else 'AUSENTE'}' não foi encontrado. Não é possível re-importar. Por favor, regenere a carga original ou use um arquivo válido.")
+                            input("Pressione Enter para continuar...")
+                            continue
+                        # Lê o CSV copiado
+                        df_reimport_temp = None
+                        csv_props = _detect_csv_properties(copied_path)
+                        delim = csv_props['delimiter']; quoting = csv_props['quoting']
+                        for enc in ENCODINGS_TO_TRY:
                             try:
-                                df_reimport_temp = pd.read_csv(copied_path, sep=detected_delimiter_reimport, dtype=str, encoding=encoding,
-                                                               on_bad_lines='skip', engine='python', header=0, quoting=detected_quoting_reimport).fillna('')
+                                df_reimport_temp = pd.read_csv(copied_path, sep=delim, dtype=str, encoding=enc, on_bad_lines='skip', engine='python', header=0, quoting=quoting).fillna('')
                                 break
                             except UnicodeDecodeError:
                                 continue
                             except Exception as e:
-                                print(f"    [AVISO] Erro ao ler CSV '{os.path.basename(copied_path)}' para re-importação com '{encoding}': {e}")
-                    else:
-                        print(f"    [ERRO] Formato de arquivo '{file_ext_reimport}' não suportado para re-importação de histórico. Apenas CSVs copiados são suportados.")
-                        input("Pressione Enter para continuar...")
-                        continue
-
-                    if df_reimport_temp is None:
-                        print(f"❌ Não foi possível ler o arquivo '{os.path.basename(copied_path)}' para re-importação.")
-                        input("Pressione Enter para continuar...")
-                        continue
-                    
-                    df_reimport_temp.columns = df_reimport_temp.columns.astype(str).strip() 
-                    reimported_cols = list(df_reimport_temp.columns)
-
-                    # Simula processed_files_data para a re-importação
-                    # RENAMED_COLUMNS_WITH_TYPES precisa ser preenchido para o DDL
-                    renamed_columns_with_types_for_reimport = {}
-                    for col_name in reimported_cols:
-                        # Re-infere o tipo ou usa um padrão se a inferência for muito cara
-                        inferred_type = _inferir_tipo_coluna(df_reimport_temp[col_name]) 
-                        renamed_columns_with_types_for_reimport[col_name] = inferred_type
-                    
-                    processed_files_data_for_reimport = [{
-                        "original_path": original_file_for_reimport, 
-                        "copied_file_path": copied_path,
-                        "table_name": entry_to_reimport.get('table_name', 'N/A'),
-                        "renamed_columns": reimported_cols, 
-                        "renamed_columns_with_types": renamed_columns_with_types_for_reimport, # NOVO: Preenchido para DDL
-                        "record_count": len(df_reimport_temp), # Pegar a contagem real do DF lido
-                        "original_sheet_name": entry_to_reimport.get('original_sheet_name', None),
-                        "log_file": entry_to_reimport.get('log_file', None), 
-                        "bad_file": entry_to_reimport.get('bad_file', None), 
-                        "ddl_success": False # Inicializado como False. O DDL irá setar True se for sucesso.
-                    }]
-
-                    # --- NOVA LÓGICA DE DECISÃO NA RE-IMPORTAÇÃO ---
-                    table_name_to_check = processed_files_data_for_reimport[0]['table_name']
-                    
-                    table_exists_in_db = False
-                    temp_log_path = os.path.join(IMPORT_BASE_FOLDER, f"{table_name_to_check}_check_exists.txt")
-                    
-                    success_check, message_check = _executar_sql_comando(f"SELECT COUNT(*) FROM USER_TABLES WHERE TABLE_NAME = '{table_name_to_check}';", 
-                                             'sqlplus', db_conn_info['user'], db_conn_info['password'], db_conn_info['db'], log_file_path=temp_log_path)
-                    
-                    if success_check:
-                        if os.path.exists(temp_log_path):
-                            with open(temp_log_path, 'r', encoding='utf-8', errors='ignore') as f_check:
-                                check_output = f_check.read()
+                                print(f"  [AVISO] Erro ao ler CSV '{os.path.basename(copied_path)}' para re-importação com '{enc}': {e}")
+                        if df_reimport_temp is None:
+                            print(f"❌ Não foi possível ler o arquivo '{os.path.basename(copied_path)}' para re-importação.")
+                            input("Pressione Enter para continuar...")
+                            continue
+                        df_reimport_temp.columns = df_reimport_temp.columns.astype(str)
+                        renamed_types_reimport = entry_to_reimport.get('column_types', {}) or {}
+                        renamed_columns_reimport = list(df_reimport_temp.columns)
+                        processed_files_data_reimp = [{
+                            "original_path": entry_to_reimport.get('original_file_name', ''),
+                            "copied_file_path": copied_path,
+                            "table_name": table_name_hist,
+                            "renamed_columns": renamed_columns_reimport,
+                            "renamed_columns_with_types": renamed_types_reimport,
+                            "record_count": len(df_reimport_temp),
+                            "original_sheet_name": entry_to_reimport.get('original_sheet_name', None),
+                            "log_file": entry_to_reimport.get('log_file', None),
+                            "bad_file": entry_to_reimport.get('bad_file', None),
+                            "ddl_success": False,
+                            "custom_indexes": entry_to_reimport.get('custom_indexes', None)
+                        }]
+                        # Verifica existência da tabela no banco
+                        table_exists = False
+                        temp_log_path = os.path.join(IMPORT_BASE_FOLDER, f"{table_name_hist}_check_exists.txt")
+                        success_check, message_check = _executar_sql_comando(f"SELECT COUNT(*) FROM USER_TABLES WHERE TABLE_NAME = '{table_name_hist}';", 'sqlplus', db_conn_info['user'], db_conn_info['password'], db_conn_info['db'], log_file_path=temp_log_path)
+                        if success_check and os.path.exists(temp_log_path):
+                            with open(temp_log_path, 'r', encoding='utf-8', errors='ignore') as f_chk:
+                                check_output = f_chk.read()
                                 match = re.search(r'^\s*(\d+)\s*$', check_output, re.MULTILINE)
                                 if match and int(match.group(1)) > 0:
-                                    table_exists_in_db = True
-                    else: # Se a verificação do SQL*Plus falhou
-                        print(f"❌ Erro ao verificar a existência da tabela '{table_name_to_check}' no banco: {message_check}. Prosseguindo com criação/substituição por segurança.")
-                        # Não definimos reimport_create_mode e load_mode aqui para que a escolha abaixo prevaleça
-                    
-                    reimport_create_mode = 'append_only' # Default para re-importação
-                    reimport_load_mode = 'append' # Default para re-importação
-
-                    if table_exists_in_db:
-                        print(f"\n--- ATENÇÃO: A tabela '{table_name_to_check}' já existe no banco de dados. ---")
-                        print("Deseja: ")
-                        print(" 1. Adicionar os novos dados à tabela existente (APPEND)")
-                        print(" 2. Dropar a tabela existente e recriá-la com os novos dados (REPLACE)")
-                        print(" 0. Cancelar a re-importação")
-
-                        user_choice_reimport_mode = input("\nDigite sua opção: ").strip()
-
-                        if user_choice_reimport_mode == '1':
-                            reimport_create_mode = 'append_only' 
-                            reimport_load_mode = 'append'
-                            print("Modo 'Adicionar nova carga' selecionado para re-importação.")
-                        elif user_choice_reimport_mode == '2':
-                            reimport_create_mode = 'drop_and_create' 
-                            reimport_load_mode = 'replace' 
-                            print("Modo 'Dropar e recriar' selecionado para re-importação.")
-                        elif user_choice_reimport_mode == '0':
-                            print("Re-importação cancelada pelo usuário.")
-                            input("Pressione Enter para continuar...")
-                            continue # Volta para o submenu de histórico
+                                    table_exists = True
+                        # Decide modo de criação/carga
+                        mode_create = 'append_only'
+                        mode_load = 'append'
+                        if table_exists:
+                            print(f"\nA tabela '{table_name_hist}' já existe no banco de dados.")
+                            print("Deseja: \n 1. Adicionar os novos dados à tabela existente (APPEND)\n 2. Dropar a tabela existente e recriá-la (REPLACE)\n 0. Cancelar")
+                            opt = input("Digite sua opção: ").strip()
+                            if opt == '2':
+                                mode_create = 'drop_and_create'; mode_load = 'replace'
+                            elif opt == '0':
+                                continue
                         else:
-                            print("Opção inválida. Assumindo 'Adicionar nova carga' (APPEND) para re-importação.")
-                            reimport_create_mode = 'append_only'
-                            reimport_load_mode = 'append'
-                    else: # Tabela não existe, sempre cria e substitui
-                        print(f"Tabela '{table_name_to_check}' não encontrada no banco. Será criada e preenchida (REPLACE).")
-                        reimport_create_mode = 'drop_and_create'
-                        reimport_load_mode = 'replace'
-
-                    # Re-executa DDL e SQL Loader com os modos decididos
-                    reimport_info_after_ddl = _gerar_e_executar_ddl(processed_files_data_for_reimport, db_conn_info, force_create_mode=reimport_create_mode)
-                    
-                    if reimport_info_after_ddl and reimport_info_after_ddl[0].get('ddl_success', False):
-                        _gerar_e_executar_sqlldr(reimport_info_after_ddl, db_conn_info, load_mode=reimport_load_mode)
+                            print(f"Tabela '{table_name_hist}' não encontrada no banco. Será criada e preenchida (REPLACE).")
+                            mode_create = 'drop_and_create'; mode_load = 'replace'
+                        # Executa DDL e SQL Loader
+                        reimp_after_ddl = _gerar_e_executar_ddl(processed_files_data_reimp, db_conn_info, force_create_mode=mode_create)
+                        if reimp_after_ddl and reimp_after_ddl[0].get('ddl_success', False):
+                            _gerar_e_executar_sqlldr(reimp_after_ddl, db_conn_info, load_mode=mode_load)
+                        else:
+                            print(f"❌ Falha na re-importação da tabela '{table_name_hist}' na etapa DDL.")
+                        input("Pressione Enter para continuar...")
+                        continue
+                    elif opcao_reimp == '2':
+                        # Selecionar um novo arquivo para re-importação
+                        print("\nSelecione o novo arquivo que deseja importar para a tabela existente.")
+                        novos_arquivos = _selecionar_arquivos_para_importacao()
+                        if not novos_arquivos:
+                            print("Nenhum arquivo selecionado. Voltando ao submenu de histórico.")
+                            time.sleep(1.5)
+                            continue
+                        if len(novos_arquivos) > 1:
+                            print("Selecione apenas UM arquivo para re-importação.")
+                            time.sleep(1.5)
+                            continue
+                        # Processa o novo arquivo sem interatividade para renomear e inferir tipos
+                        novos_processados = _processar_e_renomear_arquivos_e_colunas(novos_arquivos, interactive_definitions=False)
+                        if not novos_processados:
+                            print("Erro ao processar o novo arquivo selecionado.")
+                            input("Pressione Enter para continuar...")
+                            continue
+                        # Assume apenas o primeiro arquivo processado
+                        new_file_info = novos_processados[0]
+                        # Força o nome da tabela para o mesmo da importação histórica
+                        new_file_info['table_name'] = table_name_hist
+                        # Verifica a estrutura da tabela atual no banco para comparar
+                        db_cols = []
+                        temp_log_path = os.path.join(IMPORT_BASE_FOLDER, f"{table_name_hist}_col_check.txt")
+                        success_cols, msg_cols = _executar_sql_comando(f"SET HEADING OFF; SET FEEDBACK OFF; SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = '{table_name_hist}' ORDER BY COLUMN_ID;", 'sqlplus', db_conn_info['user'], db_conn_info['password'], db_conn_info['db'], log_file_path=temp_log_path)
+                        if success_cols and os.path.exists(temp_log_path):
+                            with open(temp_log_path, 'r', encoding='utf-8', errors='ignore') as fcols:
+                                col_output = fcols.read()
+                                for line in col_output.splitlines():
+                                    line = line.strip()
+                                    # Considere somente linhas que pareçam nomes de colunas válidos (letras, números e underscores)
+                                    if line and re.match(r'^[A-Za-z][A-Za-z0-9_]*$', line):
+                                        db_cols.append(line.upper())
+                        new_cols = list(new_file_info.get('renamed_columns', []))
+                        # Remove DT_IMPORTACAO da comparação se existir
+                        db_cols_comp = [c for c in db_cols if c != 'DT_IMPORTACAO']
+                        new_cols_comp = [c for c in new_cols if c != 'DT_IMPORTACAO']
+                        db_set = set(db_cols_comp)
+                        new_set = set(new_cols_comp)
+                        if db_set != new_set:
+                            # Estrutura diferente: apresenta diferenças
+                            print("\nDiferença entre a estrutura da tabela e o novo arquivo:")
+                            only_db = db_set - new_set
+                            only_new = new_set - db_set
+                            if only_db:
+                                print("  Colunas na tabela, mas ausentes no novo arquivo:")
+                                for c in sorted(only_db):
+                                    print(f"    - {c}")
+                            if only_new:
+                                print("  Colunas no novo arquivo, mas ausentes na tabela:")
+                                for c in sorted(only_new):
+                                    print(f"    - {c}")
+                            print("\nDeseja dropar a tabela existente e recriá-la com a nova estrutura?")
+                            print(" 1. Sim, dropar e recriar")
+                            print(" 0. Não, cancelar re-importação")
+                            opt_diff = input("Digite sua opção: ").strip()
+                            if opt_diff != '1':
+                                print("Re-importação cancelada pelo usuário.")
+                                time.sleep(1.5)
+                                continue
+                            mode_create = 'drop_and_create'
+                            mode_load = 'replace'
+                        else:
+                            # Estrutura igual: perguntar modo de carga
+                            mode_create = 'append_only'
+                            mode_load = 'append'
+                            print(f"\nEstrutura compatível com a tabela '{table_name_hist}'.")
+                            print("Deseja: \n 1. Adicionar dados (APPEND)\n 2. Dropar e recriar (REPLACE)\n 0. Cancelar")
+                            opt2 = input("Digite sua opção: ").strip()
+                            if opt2 == '2':
+                                mode_create = 'drop_and_create'
+                                mode_load = 'replace'
+                            elif opt2 == '0':
+                                continue
+                        # Executa DDL/SQL Loader para novo arquivo
+                        ddl_result = _gerar_e_executar_ddl([new_file_info], db_conn_info, force_create_mode=mode_create)
+                        if ddl_result and ddl_result[0].get('ddl_success', False):
+                            _gerar_e_executar_sqlldr(ddl_result, db_conn_info, load_mode=mode_load)
+                        else:
+                            print(f"❌ Falha na re-importação com o novo arquivo para a tabela '{table_name_hist}' na etapa DDL.")
+                        input("Pressione Enter para continuar...")
+                        continue
                     else:
-                        print(f"❌ Re-importação da tabela '{entry_to_reimport.get('table_name', 'N/A')}' falhou na etapa DDL. Verifique os logs.")
-                    input("\nPressione Enter para continuar...")
+                        print("Opção inválida.")
+                        time.sleep(1.5)
+                        continue
                 else:
                     print("Número de seleção inválido.")
                     time.sleep(1.5)
@@ -5082,7 +5524,7 @@ def _importar_carga():
             for res in load_results:
                 new_entry = {
                     "table_name": res['table_name'],
-                    "original_file_name": res['original_file'], 
+                    "original_file_name": res['original_file'],
                     "copied_file_path": next((f['copied_file_path'] for f in processed_files_data if f['table_name'] == res['table_name']), None),
                     "import_date": datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                     "records_loaded": res['records_loaded'],
@@ -5091,6 +5533,18 @@ def _importar_carga():
                     "log_file": res['log_file'],
                     "bad_file": res['bad_file']
                 }
+                # Armazena informações adicionais sobre colunas e tipos para uso futuro (re-importação)
+                file_data_match = next((f for f in processed_files_data if f['table_name'] == res['table_name']), None)
+                if file_data_match:
+                    new_entry['columns'] = file_data_match.get('renamed_columns', [])
+                    # Serializa o mapeamento de colunas para tipos como dict simples
+                    renamed_map = file_data_match.get('renamed_columns_with_types', {})
+                    if isinstance(renamed_map, dict):
+                        # Garantir que as chaves sejam strings (JSON serializável)
+                        new_entry['column_types'] = {str(k): str(v) for k, v in renamed_map.items()}
+                    else:
+                        new_entry['column_types'] = {}
+                    new_entry['custom_indexes'] = file_data_match.get('custom_indexes', None)
                 current_import_history.append(new_entry)
             _salvar_historico_importacao(current_import_history)
             
